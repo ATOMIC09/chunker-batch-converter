@@ -93,6 +93,7 @@ class ChunkerBatchConverter(QMainWindow):
         self.jar_path = None
         self.selected_input_dir = None
         self.selected_output_dir = None
+        self.custom_java_path = None  # Store custom Java path
         self.formats = {
             "Java": [
                 "JAVA_1_8_8",
@@ -172,34 +173,42 @@ class ChunkerBatchConverter(QMainWindow):
         conversion_group = QGroupBox("Batch Conversion")
         conversion_layout = QGridLayout()
         
+        # Java executable path selection
+        conversion_layout.addWidget(QLabel("Java Path:"), 0, 0)
+        self.java_path_label = QLabel("System Default")
+        conversion_layout.addWidget(self.java_path_label, 0, 1)
+        self.browse_java_button = QPushButton("Select Java")
+        self.browse_java_button.clicked.connect(self.browse_for_java)
+        conversion_layout.addWidget(self.browse_java_button, 0, 2)
+        
         # Input directory selection
-        conversion_layout.addWidget(QLabel("Input Directory:"), 0, 0)
+        conversion_layout.addWidget(QLabel("Input Directory:"), 1, 0)
         self.input_dir_label = QLabel("Not selected")
-        conversion_layout.addWidget(self.input_dir_label, 0, 1)
+        conversion_layout.addWidget(self.input_dir_label, 1, 1)
         self.browse_input_button = QPushButton("Browse")
         self.browse_input_button.clicked.connect(self.browse_input_dir)
-        conversion_layout.addWidget(self.browse_input_button, 0, 2)
+        conversion_layout.addWidget(self.browse_input_button, 1, 2)
         
         # Output directory selection
-        conversion_layout.addWidget(QLabel("Output Directory:"), 1, 0)
+        conversion_layout.addWidget(QLabel("Output Directory:"), 2, 0)
         self.output_dir_label = QLabel("Not selected")
-        conversion_layout.addWidget(self.output_dir_label, 1, 1)
+        conversion_layout.addWidget(self.output_dir_label, 2, 1)
         self.browse_output_button = QPushButton("Browse")
         self.browse_output_button.clicked.connect(self.browse_output_dir)
-        conversion_layout.addWidget(self.browse_output_button, 1, 2)
+        conversion_layout.addWidget(self.browse_output_button, 2, 2)
         
         # Format Selection
-        conversion_layout.addWidget(QLabel("Target Format:"), 2, 0)
+        conversion_layout.addWidget(QLabel("Target Format:"), 3, 0)
         
         # Format type selector (Java/Bedrock)
         self.format_type_combo = QComboBox()
         self.format_type_combo.addItems(["Java", "Bedrock"])
         self.format_type_combo.currentTextChanged.connect(self.update_format_versions)
-        conversion_layout.addWidget(self.format_type_combo, 2, 1)
+        conversion_layout.addWidget(self.format_type_combo, 3, 1)
         
         # Format version selector
         self.format_version_combo = QComboBox()
-        conversion_layout.addWidget(self.format_version_combo, 2, 2)
+        conversion_layout.addWidget(self.format_version_combo, 3, 2)
         
         # Initialize format versions
         self.update_format_versions("Java")
@@ -208,7 +217,7 @@ class ChunkerBatchConverter(QMainWindow):
         self.convert_button = QPushButton("Start Conversion")
         self.convert_button.clicked.connect(self.start_conversion)
         self.convert_button.setEnabled(False)
-        conversion_layout.addWidget(self.convert_button, 3, 0, 1, 3)
+        conversion_layout.addWidget(self.convert_button, 4, 0, 1, 3)
         
         conversion_group.setLayout(conversion_layout)
         
@@ -377,6 +386,68 @@ class ChunkerBatchConverter(QMainWindow):
             self.convert_button.setEnabled(self.selected_input_dir and self.selected_output_dir)
             self.update_status_list(f"Using {os.path.basename(jar_file)}")
     
+    def browse_for_java(self):
+        """Browse for a Java executable file to use with Chunker"""
+        java_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Java Executable",
+            "",
+            "Executable Files (*.exe);;All Files (*)" if os.name == 'nt' else "All Files (*)"
+        )
+        
+        if java_path:
+            self.custom_java_path = java_path
+            self.java_path_label.setText(os.path.basename(java_path))
+            self.update_status_list(f"Using custom Java: {java_path}")
+            
+            # Test the Java version
+            self.check_specific_java_version(java_path)
+    
+    def check_specific_java_version(self, java_path):
+        """Check if the specific Java path is valid and compatible"""
+        try:
+            process = subprocess.Popen(
+                [java_path, "-version"], 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            stdout, stderr = process.communicate()
+            
+            # Java version info is typically in stderr
+            output = stderr if stderr else stdout
+            
+            # Extract version number
+            version_match = re.search(r'version "([^"]+)"', output)
+            if not version_match:
+                QMessageBox.warning(self, "Java Version Unknown", 
+                                   f"Could not detect version for selected Java executable.")
+                return
+                
+            version_str = version_match.group(1)
+            
+            # Parse version - handle both legacy (1.8.0) and modern (17.0.2) formats
+            if version_str.startswith("1."):
+                major_version = int(version_str.split(".")[1])
+            else:
+                major_version = int(version_str.split(".")[0])
+                
+            if major_version < 17:
+                QMessageBox.warning(self, "Java Version Warning", 
+                                   f"Selected Java version ({version_str}) may be too old.\n"
+                                   "Chunker requires Java 17 or newer.")
+            else:
+                QMessageBox.information(self, "Java Version Compatible", 
+                                      f"Selected Java version ({version_str}) is compatible with Chunker.")
+                
+            self.update_status_list(f"Detected Java {version_str} at selected path")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Java Check Failed", 
+                              f"Error checking Java version: {str(e)}\n"
+                              "Selected file may not be a valid Java executable.")
+    
     def browse_input_dir(self):
         """Browse for input directory containing world files"""
         directory = QFileDialog.getExistingDirectory(self, "Select Input Directory")
@@ -485,7 +556,7 @@ class ChunkerBatchConverter(QMainWindow):
         # Build command according to the requirements:
         # java -jar chunker-cli-VERSION.jar -i "my_world" -f BEDROCK_1_20_80 -o output
         cmd = [
-            "java", "-jar", self.jar_path,
+            self.custom_java_path if self.custom_java_path else "java", "-jar", self.jar_path,
             "-i", input_path,
             "-o", target_dir,
             "-f", target_version  # Format like JAVA_1_20_5 or BEDROCK_1_20_80
@@ -522,7 +593,7 @@ class ChunkerBatchConverter(QMainWindow):
         """Check if Java is installed and its version is compatible"""
         try:
             process = subprocess.Popen(
-                ["java", "-version"], 
+                [self.custom_java_path if self.custom_java_path else "java", "-version"], 
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
