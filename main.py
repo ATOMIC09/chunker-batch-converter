@@ -2,17 +2,16 @@ import os
 import sys
 import requests
 import re
-import json
 import subprocess
 import threading
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QFileDialog, QWidget, QProgressBar,
-    QMessageBox, QListWidget, QCheckBox, QGroupBox, QGridLayout, QSizePolicy, QLineEdit
+    QMessageBox, QListWidget, QGroupBox, QGridLayout, QSizePolicy, QLineEdit
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtGui import QIcon
 
 class ReleasesFetcher(QThread):
     """Thread for fetching available chunker releases from GitHub"""
@@ -912,6 +911,13 @@ class ChunkerBatchConverter(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Set application icon for taskbar and title bar
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                            "auto_builder", "asset", "windows-logo.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+    
     window = ChunkerBatchConverter()
     window.show()
     sys.exit(app.exec())

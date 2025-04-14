@@ -1,0 +1,14 @@
+{
+  "title": "ChunkerBatchConverter Installer",
+  "icon": "../asset/mac-logo.icns",
+  "contents": [
+    { "x": 192, "y": 150, "type": "file", "path": "ChunkerBatchConverter.app" },
+    { "x": 448, "y": 150, "type": "link", "path": "/Applications" }
+  ],
+  "window": {
+    "size": {
+      "width": 600,
+      "height": 300
+    }
+  }
+}
