@@ -263,6 +263,12 @@ class ChunkerBatchConverter(QMainWindow):
         self.docs_link.setOpenExternalLinks(True)
         docs_layout.addWidget(docs_label)
         docs_layout.addWidget(self.docs_link)
+        
+        # Add source code link
+        source_link = QLabel('<a href="https://github.com/ATOMIC09/chunker-batch-converter">Source Code</a>')
+        source_link.setOpenExternalLinks(True)
+        docs_layout.addWidget(source_link)
+        
         docs_layout.addStretch(1)
         release_layout.addLayout(docs_layout)
         
