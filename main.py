@@ -638,6 +638,9 @@ class ChunkerBatchConverter(QMainWindow):
         if not self.check_java_version():
             return
         
+        # Lock all input controls during conversion
+        self.set_controls_enabled(False)
+        
         # Start conversion
         self.update_status_list("Starting conversion process...")
         self.status_label.setText("Status: Converting...")
@@ -654,6 +657,7 @@ class ChunkerBatchConverter(QMainWindow):
             self.convert_button.setEnabled(True)
             self.convert_button.setText("Start Conversion")
             self.status_label.setText("Status: No worlds found")
+            self.set_controls_enabled(True)  # Re-enable controls
             return
         
         # Prepare worlds for conversion
@@ -670,6 +674,7 @@ class ChunkerBatchConverter(QMainWindow):
             self.convert_button.setEnabled(True)
             self.convert_button.setText("Start Conversion")
             self.status_label.setText("Status: No valid worlds found")
+            self.set_controls_enabled(True)  # Re-enable controls
             return
         
         # Create progress widget with responsive layout
@@ -790,6 +795,9 @@ class ChunkerBatchConverter(QMainWindow):
         self.convert_button.setEnabled(True)
         self.convert_button.setText("Start Conversion")
         
+        # Re-enable controls
+        self.set_controls_enabled(True)
+        
         if cancelled:
             self.status_label.setText("Status: Conversion cancelled")
             self.update_status_list("Conversion process was cancelled")
@@ -881,6 +889,26 @@ class ChunkerBatchConverter(QMainWindow):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.status_list.addItem(f"[{timestamp}] {message}")
         self.status_list.scrollToBottom()
+    
+    def set_controls_enabled(self, enabled):
+        """Enable or disable all input controls"""
+        # JAR selection controls
+        self.release_combo.setEnabled(enabled)
+        self.download_button.setEnabled(enabled and self.selected_version is not None)
+        self.browse_jar_button.setEnabled(enabled)
+        self.refresh_button.setEnabled(enabled)
+        
+        # Java and directory selection
+        self.browse_java_button.setEnabled(enabled)
+        self.browse_input_button.setEnabled(enabled)
+        self.browse_output_button.setEnabled(enabled)
+        
+        # Format selection
+        self.format_type_combo.setEnabled(enabled)
+        self.format_version_combo.setEnabled(enabled)
+        self.custom_format_input.setEnabled(enabled and self.format_version_combo.currentText() == "Custom")
+        
+        # Convert button is managed separately
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
