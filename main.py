@@ -99,6 +99,7 @@ class ConversionThread(QThread):
         self.java_path = java_path
         self.add_suffix = add_suffix  # Whether to add format suffix to output folder name
         self.stop_requested = False
+        self.current_process = None  # Store reference to current Java process
         
     def run(self):
         successful = 0
@@ -129,7 +130,7 @@ class ConversionThread(QThread):
             
             try:
                 # Start process with piping to capture output in real time
-                process = subprocess.Popen(
+                self.current_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -166,15 +167,15 @@ class ConversionThread(QThread):
                                 self.log_message.emit(f"[{world_name}] {line}")
                 
                 # Start threads to read output
-                stdout_thread = threading.Thread(target=read_output, args=(process.stdout, False))
-                stderr_thread = threading.Thread(target=read_output, args=(process.stderr, True))
+                stdout_thread = threading.Thread(target=read_output, args=(self.current_process.stdout, False))
+                stderr_thread = threading.Thread(target=read_output, args=(self.current_process.stderr, True))
                 stdout_thread.daemon = True
                 stderr_thread.daemon = True
                 stdout_thread.start()
                 stderr_thread.start()
                 
                 # Wait for process to finish
-                returncode = process.wait()
+                returncode = self.current_process.wait()
                 
                 # Wait for reader threads to finish
                 stdout_thread.join(timeout=1.0)
@@ -198,6 +199,8 @@ class ConversionThread(QThread):
     def stop(self):
         """Request the thread to stop at the next opportunity"""
         self.stop_requested = True
+        if self.current_process:
+            self.current_process.terminate()
 
 class ChunkerBatchConverter(QMainWindow):
     def __init__(self):
@@ -210,6 +213,7 @@ class ChunkerBatchConverter(QMainWindow):
         self.selected_input_dir = None
         self.selected_output_dir = None
         self.custom_java_path = None  # Store custom Java path
+        self.is_cancelling = False  # Flag to track cancellation state
         self.formats = {
             "Java": [
                 "JAVA_1_8_8",
@@ -758,24 +762,37 @@ class ChunkerBatchConverter(QMainWindow):
             
             if reply == QMessageBox.StandardButton.Yes:
                 self.update_status_list("Cancelling conversion process...")
+                self.is_cancelling = True  # Set cancellation flag
                 self.conversion_thread.stop()
                 self.conversion_thread.wait(1000)  # Give thread 1 sec to clean up
                 self.on_conversion_completed(0, cancelled=True)
     
     def update_conversion_progress(self, world_name, percentage):
         """Update conversion progress for the current world"""
-        self.world_progress.setValue(percentage)
-        self.world_progress.setFormat(f"{world_name}: {percentage}%")
+        # Skip progress updates if cancelling or if progress bars have been deleted
+        if self.is_cancelling or not hasattr(self, 'world_progress'):
+            return
         
-        # Update overall progress
-        if self.total_worlds > 0:
-            overall = int((self.current_world_index * 100 + percentage) / self.total_worlds)
-            self.overall_progress.setValue(overall)
+        try:
+            # Use try-except to catch any Qt errors if widgets are being deleted
+            self.world_progress.setValue(percentage)
+            self.world_progress.setFormat(f"{world_name}: {percentage}%")
             
-        self.status_label.setText(f"Status: Converting {world_name} ({percentage}%)")
+            # Update overall progress
+            if self.total_worlds > 0 and hasattr(self, 'overall_progress'):
+                overall = int((self.current_world_index * 100 + percentage) / self.total_worlds)
+                self.overall_progress.setValue(overall)
+                
+            self.status_label.setText(f"Status: Converting {world_name} ({percentage}%)")
+        except RuntimeError:
+            # Ignore Qt runtime errors that might occur during widget deletion
+            pass
     
     def on_world_completed(self, world_name, success, message):
         """Handle completion of a single world conversion"""
+        if self.is_cancelling:
+            return  # Ignore world completion updates if cancelling
+        
         if success:
             self.update_status_list(f"✓ Successfully converted {world_name}: {message}")
         else:
@@ -796,6 +813,8 @@ class ChunkerBatchConverter(QMainWindow):
         
         # Re-enable controls
         self.set_controls_enabled(True)
+        
+        self.is_cancelling = False  # Reset cancellation flag
         
         if cancelled:
             self.status_label.setText("Status: Conversion cancelled")
