@@ -1,6 +1,22 @@
 # Chunker Batch Converter
 
+<p>
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0-blue.svg?cacheSeconds=2592000" />
+  <a href="#" target="_blank">
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-GPLv3-yellow.svg" />
+  </a>
+  <a href="https://github.com/ATOMIC09/chunker-batch-converter/tags">
+      <img alt="Download" src="https://img.shields.io/github/downloads/ATOMIC09/chunker-batch-converter/total" />
+  </a>
+</p>
+
 A GUI application for batch converting Minecraft worlds between Java and Bedrock editions using the [Chunker](https://github.com/HiveGamesOSS/Chunker) tool.
+
+![image](https://github.com/user-attachments/assets/a2c13011-73e9-4f50-af85-419e57ae3631)
+
+## Download
+You can see all versions from `Releases` tab
+- [`Download for Windows (v1.0)`](https://github.com/ATOMIC09/chunker-batch-converter/releases/download/v1.0/ChunkerBatchConverter-1.0-windows-x86_64.exe)
 
 ## Features
 
