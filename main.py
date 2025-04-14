@@ -9,7 +9,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QFileDialog, QWidget, QProgressBar,
-    QMessageBox, QListWidget, QCheckBox, QGroupBox, QGridLayout
+    QMessageBox, QListWidget, QCheckBox, QGroupBox, QGridLayout, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -91,13 +91,14 @@ class ConversionThread(QThread):
     conversion_completed = pyqtSignal(int)  # total_successful
     log_message = pyqtSignal(str)  # message
     
-    def __init__(self, worlds, jar_path, output_dir, target_version, java_path=None):
+    def __init__(self, worlds, jar_path, output_dir, target_version, java_path=None, add_suffix=False):
         super().__init__()
         self.worlds = worlds  # List of (world_name, world_path) tuples
         self.jar_path = jar_path
         self.output_dir = output_dir
         self.target_version = target_version
         self.java_path = java_path
+        self.add_suffix = add_suffix  # Whether to add format suffix to output folder name
         self.stop_requested = False
         
     def run(self):
@@ -107,7 +108,12 @@ class ConversionThread(QThread):
             if self.stop_requested:
                 break
                 
-            output_dir_name = f"{world_name}_{self.target_version.lower()}"
+            # Determine output directory name
+            if self.add_suffix:
+                output_dir_name = f"{world_name}_{self.target_version.lower()}"
+            else:
+                output_dir_name = world_name
+                
             target_dir = os.path.join(self.output_dir, output_dir_name)
             
             # Create target directory if it doesn't exist
@@ -629,43 +635,65 @@ class ChunkerBatchConverter(QMainWindow):
             self.status_label.setText("Status: No valid worlds found")
             return
         
-        # Create progress bars and add them to the conversion group box
-        conversion_group = self.findChild(QGroupBox, "")
-        conversion_layout = None
-        
-        # Find the conversion group box
-        for i in range(self.centralWidget().layout().count()):
-            widget = self.centralWidget().layout().itemAt(i).widget()
-            if isinstance(widget, QGroupBox) and widget.title() == "Batch Conversion":
-                conversion_group = widget
-                conversion_layout = widget.layout()
-                break
-        
-        # If we couldn't find the layout, use the main layout instead
-        if conversion_layout is None:
-            conversion_layout = self.centralWidget().layout()
+        # Create progress widget with responsive layout
+        self.progress_widget = QWidget()
+        progress_layout = QVBoxLayout(self.progress_widget)
+        progress_layout.setContentsMargins(5, 5, 5, 5)
         
         # Create a progress bar for overall progress
         self.overall_progress = QProgressBar()
         self.overall_progress.setRange(0, 100)
         self.overall_progress.setValue(0)
         self.overall_progress.setFormat("Overall Progress: %p%")
-        conversion_layout.addWidget(self.overall_progress)
+        # Make progress bar stretch horizontally
+        self.overall_progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        progress_layout.addWidget(self.overall_progress)
         
         # Create a progress bar for current world progress
         self.world_progress = QProgressBar()
         self.world_progress.setRange(0, 100)
         self.world_progress.setValue(0)
         self.world_progress.setFormat("Current World: %p%")
-        conversion_layout.addWidget(self.world_progress)
+        # Make progress bar stretch horizontally
+        self.world_progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        progress_layout.addWidget(self.world_progress)
         
         # Show the cancel button
         self.cancel_button = QPushButton("Cancel Conversion")
         self.cancel_button.clicked.connect(self.cancel_conversion)
-        conversion_layout.addWidget(self.cancel_button)
+        progress_layout.addWidget(self.cancel_button)
         
-        # Start conversion thread
-        self.conversion_thread = ConversionThread(worlds, self.jar_path, self.selected_output_dir, target_version, self.custom_java_path)
+        # Add the progress widget to the layout between conversion and status sections
+        main_layout = self.centralWidget().layout()
+        
+        # Find the indexes of the conversion and status group boxes
+        conversion_idx = -1
+        status_idx = -1
+        for i in range(main_layout.count()):
+            widget = main_layout.itemAt(i).widget()
+            if isinstance(widget, QGroupBox):
+                if widget.title() == "Batch Conversion":
+                    conversion_idx = i
+                elif widget.title() == "Status":
+                    status_idx = i
+        
+        # Insert progress widget between conversion and status
+        if conversion_idx >= 0 and status_idx >= 0:
+            main_layout.insertWidget(status_idx, self.progress_widget)
+        else:
+            # Fallback if we couldn't find the sections
+            main_layout.addWidget(self.progress_widget)
+        
+        # Start conversion thread (with add_suffix=False to prevent format suffixes)
+        self.conversion_thread = ConversionThread(
+            worlds, 
+            self.jar_path, 
+            self.selected_output_dir, 
+            target_version, 
+            self.custom_java_path, 
+            add_suffix=False  # Don't add format suffixes to world folders
+        )
+        
         self.conversion_thread.progress_updated.connect(self.update_conversion_progress)
         self.conversion_thread.world_completed.connect(self.on_world_completed)
         self.conversion_thread.conversion_completed.connect(self.on_conversion_completed)
@@ -717,20 +745,10 @@ class ChunkerBatchConverter(QMainWindow):
     def on_conversion_completed(self, total_successful, cancelled=False):
         """Handle completion of all conversions"""
         # Clean up progress bars and cancel button
-        if hasattr(self, 'overall_progress'):
-            self.overall_progress.setParent(None)
-            self.overall_progress.deleteLater()
-            delattr(self, 'overall_progress')
-            
-        if hasattr(self, 'world_progress'):
-            self.world_progress.setParent(None)
-            self.world_progress.deleteLater()
-            delattr(self, 'world_progress')
-            
-        if hasattr(self, 'cancel_button'):
-            self.cancel_button.setParent(None)
-            self.cancel_button.deleteLater()
-            delattr(self, 'cancel_button')
+        if hasattr(self, 'progress_widget'):
+            self.progress_widget.setParent(None)
+            self.progress_widget.deleteLater()
+            delattr(self, 'progress_widget')
         
         self.convert_button.setEnabled(True)
         self.convert_button.setText("Start Conversion")
