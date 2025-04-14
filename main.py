@@ -4,6 +4,7 @@ import requests
 import re
 import json
 import subprocess
+import threading
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -82,6 +83,116 @@ class DownloadThread(QThread):
             self.download_error.emit(f"Error downloading file: {str(e)}")
             if os.path.exists(self.save_path):
                 os.remove(self.save_path)  # Clean up partially downloaded file
+
+class ConversionThread(QThread):
+    """Thread for running chunker conversions without freezing the GUI"""
+    progress_updated = pyqtSignal(str, int)  # world_name, percentage
+    world_completed = pyqtSignal(str, bool, str)  # world_name, success, message
+    conversion_completed = pyqtSignal(int)  # total_successful
+    log_message = pyqtSignal(str)  # message
+    
+    def __init__(self, worlds, jar_path, output_dir, target_version, java_path=None):
+        super().__init__()
+        self.worlds = worlds  # List of (world_name, world_path) tuples
+        self.jar_path = jar_path
+        self.output_dir = output_dir
+        self.target_version = target_version
+        self.java_path = java_path
+        self.stop_requested = False
+        
+    def run(self):
+        successful = 0
+        
+        for world_name, world_path in self.worlds:
+            if self.stop_requested:
+                break
+                
+            output_dir_name = f"{world_name}_{self.target_version.lower()}"
+            target_dir = os.path.join(self.output_dir, output_dir_name)
+            
+            # Create target directory if it doesn't exist
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+            
+            # Build command
+            cmd = [
+                self.java_path if self.java_path else "java", "-jar", self.jar_path,
+                "-i", world_path,
+                "-o", target_dir,
+                "-f", self.target_version
+            ]
+            
+            try:
+                # Start process with piping to capture output in real time
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,  # Line buffered
+                    universal_newlines=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                # Track progress
+                last_percentage = 0
+                errors = []
+                
+                # Use separate threads to read stdout and stderr to prevent deadlock
+                def read_output(pipe, is_error):
+                    nonlocal last_percentage
+                    for line in iter(pipe.readline, ''):
+                        line = line.strip()
+                        if line:
+                            # Check if it's a percentage
+                            if '%' in line and not is_error:
+                                try:
+                                    percentage = float(line.replace('%', ''))
+                                    if abs(percentage - last_percentage) >= 1.0:  # Only update on significant changes
+                                        last_percentage = percentage
+                                        self.progress_updated.emit(world_name, int(percentage))
+                                except ValueError:
+                                    pass
+                            # Log all output
+                            if is_error or not line.endswith('%'):  # Don't spam log with percentage updates
+                                if "Missing" in line:  # Special handling for mapping errors
+                                    errors.append(line)
+                                    
+                                self.log_message.emit(f"[{world_name}] {line}")
+                
+                # Start threads to read output
+                stdout_thread = threading.Thread(target=read_output, args=(process.stdout, False))
+                stderr_thread = threading.Thread(target=read_output, args=(process.stderr, True))
+                stdout_thread.daemon = True
+                stderr_thread.daemon = True
+                stdout_thread.start()
+                stderr_thread.start()
+                
+                # Wait for process to finish
+                returncode = process.wait()
+                
+                # Wait for reader threads to finish
+                stdout_thread.join(timeout=1.0)
+                stderr_thread.join(timeout=1.0)
+                
+                if returncode == 0:
+                    successful += 1
+                    message = "Conversion successful"
+                    if errors:
+                        message += f" with {len(errors)} mapping warnings"
+                    self.world_completed.emit(world_name, True, message)
+                else:
+                    error_summary = "\n".join(errors) if errors else "Unknown error"
+                    self.world_completed.emit(world_name, False, f"Failed with exit code {returncode}: {error_summary}")
+            
+            except Exception as e:
+                self.world_completed.emit(world_name, False, str(e))
+        
+        self.conversion_completed.emit(successful)
+    
+    def stop(self):
+        """Request the thread to stop at the next opportunity"""
+        self.stop_requested = True
 
 class ChunkerBatchConverter(QMainWindow):
     def __init__(self):
@@ -488,6 +599,7 @@ class ChunkerBatchConverter(QMainWindow):
         self.update_status_list("Starting conversion process...")
         self.status_label.setText("Status: Converting...")
         self.convert_button.setEnabled(False)
+        self.convert_button.setText("Converting...")
         
         # Process all worlds in input directory
         input_dirs = [d for d in os.listdir(self.selected_input_dir) 
@@ -497,32 +609,141 @@ class ChunkerBatchConverter(QMainWindow):
         if not input_dirs:
             QMessageBox.warning(self, "Warning", "No directories found in the input directory")
             self.convert_button.setEnabled(True)
+            self.convert_button.setText("Start Conversion")
             self.status_label.setText("Status: No worlds found")
             return
         
-        # Process each world
-        success_count = 0
-        for world_dir in input_dirs:
-            full_input_path = os.path.join(self.selected_input_dir, world_dir)
-            self.update_status_list(f"Processing world: {world_dir}")
-            
-            # Check if it looks like a Minecraft world
-            if not self.is_minecraft_world(full_input_path):
-                self.update_status_list(f"Skipping {world_dir} - doesn't look like a Minecraft world")
-                continue
-                
-            # Prepare and run conversion commands
-            self.convert_world(full_input_path, target_format, target_version)
-            success_count += 1
+        # Prepare worlds for conversion
+        worlds = []
+        for d in input_dirs:
+            full_path = os.path.join(self.selected_input_dir, d)
+            if self.is_minecraft_world(full_path):
+                worlds.append((d, full_path))
+            else:
+                self.update_status_list(f"Skipping {d} - doesn't look like a Minecraft world")
         
-        # Update status
+        if not worlds:
+            QMessageBox.warning(self, "Warning", "No valid Minecraft worlds found in the input directory")
+            self.convert_button.setEnabled(True)
+            self.convert_button.setText("Start Conversion")
+            self.status_label.setText("Status: No valid worlds found")
+            return
+        
+        # Create progress bars and add them to the conversion group box
+        conversion_group = self.findChild(QGroupBox, "")
+        conversion_layout = None
+        
+        # Find the conversion group box
+        for i in range(self.centralWidget().layout().count()):
+            widget = self.centralWidget().layout().itemAt(i).widget()
+            if isinstance(widget, QGroupBox) and widget.title() == "Batch Conversion":
+                conversion_group = widget
+                conversion_layout = widget.layout()
+                break
+        
+        # If we couldn't find the layout, use the main layout instead
+        if conversion_layout is None:
+            conversion_layout = self.centralWidget().layout()
+        
+        # Create a progress bar for overall progress
+        self.overall_progress = QProgressBar()
+        self.overall_progress.setRange(0, 100)
+        self.overall_progress.setValue(0)
+        self.overall_progress.setFormat("Overall Progress: %p%")
+        conversion_layout.addWidget(self.overall_progress)
+        
+        # Create a progress bar for current world progress
+        self.world_progress = QProgressBar()
+        self.world_progress.setRange(0, 100)
+        self.world_progress.setValue(0)
+        self.world_progress.setFormat("Current World: %p%")
+        conversion_layout.addWidget(self.world_progress)
+        
+        # Show the cancel button
+        self.cancel_button = QPushButton("Cancel Conversion")
+        self.cancel_button.clicked.connect(self.cancel_conversion)
+        conversion_layout.addWidget(self.cancel_button)
+        
+        # Start conversion thread
+        self.conversion_thread = ConversionThread(worlds, self.jar_path, self.selected_output_dir, target_version, self.custom_java_path)
+        self.conversion_thread.progress_updated.connect(self.update_conversion_progress)
+        self.conversion_thread.world_completed.connect(self.on_world_completed)
+        self.conversion_thread.conversion_completed.connect(self.on_conversion_completed)
+        self.conversion_thread.log_message.connect(self.update_status_list)
+        
+        self.update_status_list(f"Starting conversion of {len(worlds)} worlds to {target_version}")
+        self.current_world_index = 0
+        self.total_worlds = len(worlds)
+        self.conversion_thread.start()
+    
+    def cancel_conversion(self):
+        """Cancel the running conversion process"""
+        if hasattr(self, 'conversion_thread') and self.conversion_thread.isRunning():
+            reply = QMessageBox.question(
+                self, 
+                'Confirm Cancellation',
+                "Are you sure you want to cancel the conversion process?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.update_status_list("Cancelling conversion process...")
+                self.conversion_thread.stop()
+                self.conversion_thread.wait(1000)  # Give thread 1 sec to clean up
+                self.on_conversion_completed(0, cancelled=True)
+    
+    def update_conversion_progress(self, world_name, percentage):
+        """Update conversion progress for the current world"""
+        self.world_progress.setValue(percentage)
+        self.world_progress.setFormat(f"{world_name}: {percentage}%")
+        
+        # Update overall progress
+        if self.total_worlds > 0:
+            overall = int((self.current_world_index * 100 + percentage) / self.total_worlds)
+            self.overall_progress.setValue(overall)
+            
+        self.status_label.setText(f"Status: Converting {world_name} ({percentage}%)")
+    
+    def on_world_completed(self, world_name, success, message):
+        """Handle completion of a single world conversion"""
+        if success:
+            self.update_status_list(f"✓ Successfully converted {world_name}: {message}")
+        else:
+            self.update_status_list(f"✗ Failed to convert {world_name}: {message}")
+            
+        self.current_world_index += 1
+        
+    def on_conversion_completed(self, total_successful, cancelled=False):
+        """Handle completion of all conversions"""
+        # Clean up progress bars and cancel button
+        if hasattr(self, 'overall_progress'):
+            self.overall_progress.setParent(None)
+            self.overall_progress.deleteLater()
+            delattr(self, 'overall_progress')
+            
+        if hasattr(self, 'world_progress'):
+            self.world_progress.setParent(None)
+            self.world_progress.deleteLater()
+            delattr(self, 'world_progress')
+            
+        if hasattr(self, 'cancel_button'):
+            self.cancel_button.setParent(None)
+            self.cancel_button.deleteLater()
+            delattr(self, 'cancel_button')
+        
         self.convert_button.setEnabled(True)
-        if success_count > 0:
-            self.status_label.setText(f"Status: Conversion complete ({success_count} conversions)")
+        self.convert_button.setText("Start Conversion")
+        
+        if cancelled:
+            self.status_label.setText("Status: Conversion cancelled")
+            self.update_status_list("Conversion process was cancelled")
+        elif total_successful > 0:
+            self.status_label.setText(f"Status: Conversion complete ({total_successful} of {self.total_worlds} conversions)")
             self.update_status_list("Conversion process completed")
         else:
-            self.status_label.setText("Status: No worlds converted")
-            self.update_status_list("No worlds were converted")
+            self.status_label.setText("Status: No worlds converted successfully")
+            self.update_status_list("No worlds were converted successfully")
     
     def is_minecraft_world(self, directory):
         """Check if the directory looks like a Minecraft world"""
@@ -542,52 +763,6 @@ class ChunkerBatchConverter(QMainWindow):
             return True
             
         return False
-    
-    def convert_world(self, input_path, target_type, target_version):
-        """Convert a world to the specified format using chunker-cli"""
-        world_name = os.path.basename(input_path)
-        output_dir_name = f"{world_name}_{target_version.lower()}"
-        target_dir = os.path.join(self.selected_output_dir, output_dir_name)
-        
-        # Create target directory if it doesn't exist
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-        
-        # Build command according to the requirements:
-        # java -jar chunker-cli-VERSION.jar -i "my_world" -f BEDROCK_1_20_80 -o output
-        cmd = [
-            self.custom_java_path if self.custom_java_path else "java", "-jar", self.jar_path,
-            "-i", input_path,
-            "-o", target_dir,
-            "-f", target_version  # Format like JAVA_1_20_5 or BEDROCK_1_20_80
-        ]
-        
-        self.update_status_list(f"Converting {world_name} to {target_version}...")
-        
-        try:
-            # Run the command
-            process = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            
-            stdout, stderr = process.communicate()
-            
-            if process.returncode == 0:
-                self.update_status_list(f"Successfully converted {world_name} to {target_version}")
-            else:
-                self.update_status_list(f"Error converting {world_name}: {stderr}")
-                # Show detailed error in a dialog
-                QMessageBox.critical(self, "Conversion Error", 
-                                    f"Error converting {world_name}:\n\n{stderr}")
-        except Exception as e:
-            error_msg = str(e)
-            self.update_status_list(f"Exception during conversion: {error_msg}")
-            QMessageBox.critical(self, "Conversion Exception", 
-                                f"Exception during conversion of {world_name}:\n\n{error_msg}")
     
     def check_java_version(self):
         """Check if Java is installed and its version is compatible"""
