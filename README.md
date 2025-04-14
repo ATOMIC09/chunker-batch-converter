@@ -2,7 +2,7 @@
 
 A GUI application for batch converting Minecraft worlds between Java and Bedrock editions using the [Chunker](https://github.com/HiveGamesOSS/Chunker) tool.
 
-![image](https://github.com/user-attachments/assets/b100a92d-fbac-43dc-a5fd-2d7c49a596e0)
+![image](https://github.com/user-attachments/assets/a2c13011-73e9-4f50-af85-419e57ae3631)
 
 ## Features
 
