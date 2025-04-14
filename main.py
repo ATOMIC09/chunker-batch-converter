@@ -9,7 +9,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QFileDialog, QWidget, QProgressBar,
-    QMessageBox, QListWidget, QCheckBox, QGroupBox, QGridLayout, QSizePolicy
+    QMessageBox, QListWidget, QCheckBox, QGroupBox, QGridLayout, QSizePolicy, QLineEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -225,8 +225,8 @@ class ChunkerBatchConverter(QMainWindow):
                 "JAVA_1_17", "JAVA_1_17_1",
                 "JAVA_1_18", "JAVA_1_18_2",
                 "JAVA_1_19", "JAVA_1_19_4",
-                "JAVA_1_20", "JAVA_1_20_5", "JAVA_1_20_6",
-                "JAVA_1_21", "JAVA_1_21_5"
+                "JAVA_1_20", "JAVA_1_20_4", "JAVA_1_20_6",
+                "JAVA_1_21", "JAVA_1_21_4", "JAVA_1_21_5"
             ],
             "Bedrock": [
                 "BEDROCK_1_12",
@@ -252,6 +252,16 @@ class ChunkerBatchConverter(QMainWindow):
         # Release selection area
         self.release_group = QGroupBox("Chunker-CLI Selection")
         release_layout = QVBoxLayout()
+        
+        # Add documentation link
+        docs_layout = QHBoxLayout()
+        docs_label = QLabel("Documentation:")
+        self.docs_link = QLabel('<a href="https://github.com/HiveGamesOSS/Chunker/blob/main/README.md">View Supported Versions</a>')
+        self.docs_link.setOpenExternalLinks(True)
+        docs_layout.addWidget(docs_label)
+        docs_layout.addWidget(self.docs_link)
+        docs_layout.addStretch(1)
+        release_layout.addLayout(docs_layout)
         
         release_info_layout = QHBoxLayout()
         self.release_label = QLabel("Available Versions:")
@@ -323,9 +333,17 @@ class ChunkerBatchConverter(QMainWindow):
         self.format_type_combo.currentTextChanged.connect(self.update_format_versions)
         conversion_layout.addWidget(self.format_type_combo, 3, 1)
         
-        # Format version selector
+        # Format version selector (ComboBox)
         self.format_version_combo = QComboBox()
+        self.format_version_combo.currentTextChanged.connect(self.on_format_version_changed)
         conversion_layout.addWidget(self.format_version_combo, 3, 2)
+        
+        # Custom format entry (TextField)
+        conversion_layout.addWidget(QLabel("Custom Format:"), 4, 0)
+        self.custom_format_input = QLineEdit()
+        self.custom_format_input.setPlaceholderText("e.g. JAVA_1_21_6 (only used with Custom option)")
+        self.custom_format_input.setEnabled(False)
+        conversion_layout.addWidget(self.custom_format_input, 4, 1, 1, 2)
         
         # Initialize format versions
         self.update_format_versions("Java")
@@ -334,7 +352,7 @@ class ChunkerBatchConverter(QMainWindow):
         self.convert_button = QPushButton("Start Conversion")
         self.convert_button.clicked.connect(self.start_conversion)
         self.convert_button.setEnabled(False)
-        conversion_layout.addWidget(self.convert_button, 4, 0, 1, 3)
+        conversion_layout.addWidget(self.convert_button, 5, 0, 1, 3)
         
         conversion_group.setLayout(conversion_layout)
         
@@ -362,11 +380,24 @@ class ChunkerBatchConverter(QMainWindow):
         """Update the format versions dropdown based on the selected format type"""
         self.format_version_combo.clear()
         if format_type in self.formats:
+            # Add all predefined versions
             for version in self.formats[format_type]:
                 self.format_version_combo.addItem(version)
+                
+            # Add Custom option at the end
+            self.format_version_combo.addItem("Custom")
+            
             # Select the latest version by default
-            if self.format_version_combo.count() > 0:
-                self.format_version_combo.setCurrentIndex(self.format_version_combo.count() - 1)
+            if self.format_version_combo.count() > 1:  # More than just Custom
+                self.format_version_combo.setCurrentIndex(self.format_version_combo.count() - 2)  # Second to last (before Custom)
+        
+        # Reset custom format input
+        self.custom_format_input.setEnabled(False)
+        self.custom_format_input.clear()
+    
+    def on_format_version_changed(self, version):
+        """Enable or disable custom format input based on selected version"""
+        self.custom_format_input.setEnabled(version == "Custom")
     
     def check_jar_and_fetch_releases(self):
         """Check if chunker-cli.jar exists and fetch available releases"""
@@ -500,7 +531,7 @@ class ChunkerBatchConverter(QMainWindow):
         if jar_file:
             self.jar_path = jar_file
             self.jar_status_label.setText(f"Status: Selected {os.path.basename(jar_file)}")
-            self.convert_button.setEnabled(self.selected_input_dir and self.selected_output_dir)
+            self.convert_button.setEnabled(bool(self.jar_path and self.selected_input_dir and self.selected_output_dir))
             self.update_status_list(f"Using {os.path.basename(jar_file)}")
     
     def browse_for_java(self):
@@ -592,6 +623,12 @@ class ChunkerBatchConverter(QMainWindow):
         # Validate conversion options
         target_format = self.format_type_combo.currentText()
         target_version = self.format_version_combo.currentText()
+        
+        if target_version == "Custom":
+            target_version = self.custom_format_input.text().strip()
+            if not target_version:
+                QMessageBox.warning(self, "Warning", "Please enter a custom format version")
+                return
         
         if not target_version:
             QMessageBox.warning(self, "Warning", "Please select a target format version")
