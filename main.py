@@ -129,16 +129,21 @@ class ConversionThread(QThread):
             ]
             
             try:
-                # Start process with piping to capture output in real time
-                self.current_process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,  # Line buffered
-                    universal_newlines=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
+                # Start process with platform-specific options
+                process_kwargs = {
+                    'stdout': subprocess.PIPE,
+                    'stderr': subprocess.PIPE,
+                    'text': True,
+                    'bufsize': 1,  # Line buffered
+                    'universal_newlines': True
+                }
+                
+                # Add Windows-specific flags only on Windows
+                if sys.platform == 'win32':
+                    process_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                    
+                # Start the process
+                self.current_process = subprocess.Popen(cmd, **process_kwargs)
                 
                 # Track progress
                 last_percentage = 0
@@ -414,17 +419,33 @@ class ChunkerBatchConverter(QMainWindow):
         self.download_button.setEnabled(False)
         self.convert_button.setEnabled(False)
         
-        # Check if jar exists in the application directory
-        jar_files = [f for f in os.listdir('.') if f.startswith('chunker-cli-') and f.endswith('.jar')]
+        # Get possible jar locations
+        jar_locations = ['.']  # Current directory is always checked
+        
+        # On macOS, also check the Documents folder
+        if sys.platform == 'darwin':
+            documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+            app_data_dir = os.path.join(documents_dir, "ChunkerBatchConverter")
+            if os.path.exists(app_data_dir):
+                jar_locations.append(app_data_dir)
+        
+        # Check all locations for jar files
+        jar_files = []
+        for location in jar_locations:
+            if os.path.exists(location) and os.path.isdir(location):
+                for f in os.listdir(location):
+                    if f.startswith('chunker-cli-') and f.endswith('.jar'):
+                        jar_files.append(os.path.join(location, f))
         
         if jar_files:
-            # Use the first jar file found
-            self.jar_path = os.path.abspath(jar_files[0])
+            # Use the most recent jar file found (by modification time)
+            jar_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            self.jar_path = jar_files[0]
             self.jar_status_label.setText(f"Status: Found {os.path.basename(self.jar_path)}")
             # Only enable convert button if both input and output dirs are selected
             if self.selected_input_dir and self.selected_output_dir:
                 self.convert_button.setEnabled(True)
-            self.update_status_list(f"Using {os.path.basename(self.jar_path)}")
+            self.update_status_list(f"Using {os.path.basename(self.jar_path)} from {os.path.dirname(self.jar_path)}")
         else:
             self.jar_status_label.setText("Status: No chunker-cli.jar found")
             self.update_status_list("No chunker-cli.jar found - please download or browse for one")
@@ -474,6 +495,42 @@ class ChunkerBatchConverter(QMainWindow):
         if index >= 0 and index < len(self.releases):
             self.selected_version = self.releases[index]
     
+    def get_writable_download_dir(self):
+        """Get a writable directory for downloading the JAR file
+        This handles the case where the app is running from a read-only location (like a Mac .app bundle)
+        """
+        # First try the user's Documents directory
+        try:
+            if sys.platform == 'darwin':  # macOS
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                app_data_dir = os.path.join(documents_dir, "ChunkerBatchConverter")
+            elif sys.platform == 'win32':  # Windows
+                app_data_dir = os.path.join(os.environ["APPDATA"], "ChunkerBatchConverter")
+            else:  # Linux and others
+                app_data_dir = os.path.join(os.path.expanduser("~"), ".chunker-batch-converter")
+            
+            # Create the directory if it doesn't exist
+            if not os.path.exists(app_data_dir):
+                os.makedirs(app_data_dir)
+                self.update_status_list(f"Created application data directory at {app_data_dir}")
+            
+            # Test if the directory is writable
+            test_file = os.path.join(app_data_dir, "write_test")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            
+            return app_data_dir
+        
+        except Exception as e:
+            self.update_status_list(f"Warning: Could not use application data directory: {str(e)}")
+            
+            # Fallback to a temporary directory
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            self.update_status_list(f"Using temporary directory for downloads: {temp_dir}")
+            return temp_dir
+    
     def download_selected_version(self):
         """Download the selected chunker-cli.jar version"""
         if not self.selected_version:
@@ -491,7 +548,16 @@ class ChunkerBatchConverter(QMainWindow):
         
         if reply == QMessageBox.StandardButton.Yes:
             download_url = self.selected_version['download_url']
-            save_path = os.path.abspath(self.selected_version['jar_name'])
+            
+            # Choose download directory based on platform
+            if sys.platform == 'darwin':  # macOS
+                # Use Documents folder on macOS to avoid read-only app bundle issues
+                download_dir = self.get_writable_download_dir()
+            else:  # Windows and others
+                # Use current directory (same as executable) for Windows
+                download_dir = '.'
+                
+            save_path = os.path.join(download_dir, self.selected_version['jar_name'])
             
             # Start download
             self.download_progress.setVisible(True)
@@ -505,7 +571,7 @@ class ChunkerBatchConverter(QMainWindow):
             self.download_thread.download_error.connect(self.download_error)
             self.download_thread.start()
             
-            self.update_status_list(f"Downloading {self.selected_version['jar_name']}...")
+            self.update_status_list(f"Downloading {self.selected_version['jar_name']} to {os.path.abspath(download_dir)}...")
     
     def update_download_progress(self, percent):
         """Update download progress bar"""
@@ -566,13 +632,23 @@ class ChunkerBatchConverter(QMainWindow):
     def check_specific_java_version(self, java_path):
         """Check if the specific Java path is valid and compatible"""
         try:
-            process = subprocess.Popen(
-                [java_path, "-version"], 
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            # Create platform-specific process 
+            if sys.platform == 'win32':  # Windows
+                process = subprocess.Popen(
+                    [java_path, "-version"], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:  # macOS, Linux, etc.
+                process = subprocess.Popen(
+                    [java_path, "-version"], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            
             stdout, stderr = process.communicate()
             
             # Java version info is typically in stderr
@@ -857,13 +933,63 @@ class ChunkerBatchConverter(QMainWindow):
     def check_java_version(self):
         """Check if Java is installed and its version is compatible"""
         try:
-            process = subprocess.Popen(
-                [self.custom_java_path if self.custom_java_path else "java", "-version"], 
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            # Get the actual Java path being used
+            java_path = self.custom_java_path if self.custom_java_path else "java"
+            
+            # If it's just "java", find the actual path on Unix systems
+            if java_path == "java" and sys.platform != 'win32':
+                try:
+                    # Use 'which' on Unix/macOS to find the actual path
+                    process = subprocess.Popen(
+                        ["which", "java"], 
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    stdout, _ = process.communicate()
+                    if stdout.strip():
+                        resolved_path = stdout.strip()
+                        self.update_status_list(f"Java executable located at: {resolved_path}")
+                except Exception as e:
+                    self.update_status_list(f"Could not determine Java path: {str(e)}")
+            elif sys.platform == 'win32' and java_path == "java":
+                try:
+                    # On Windows, use 'where' to find java.exe
+                    process = subprocess.Popen(
+                        ["where", "java"], 
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    stdout, _ = process.communicate()
+                    if stdout.strip():
+                        # The first line should be the default Java path
+                        resolved_path = stdout.strip().split('\n')[0]
+                        self.update_status_list(f"Java executable located at: {resolved_path}")
+                except Exception as e:
+                    self.update_status_list(f"Could not determine Java path: {str(e)}")
+            else:
+                # Using custom Java path
+                self.update_status_list(f"Using custom Java executable: {java_path}")
+            
+            # Create platform-specific process
+            if sys.platform == 'win32':  # Windows
+                process = subprocess.Popen(
+                    [java_path, "-version"], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:  # macOS, Linux, etc.
+                process = subprocess.Popen(
+                    [java_path, "-version"], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            
             stdout, stderr = process.communicate()
             
             # Java version info is typically in stderr
