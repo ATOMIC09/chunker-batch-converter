@@ -19,6 +19,16 @@ if %errorlevel% neq 0 (
 ) else (
     echo PyQt6 is already installed.
 )
+
+REM Check if requests is installed
+echo Checking for requests installation...
+python -c "import requests" 2>nul
+if %errorlevel% neq 0 (
+    echo requests is not installed. Installing now...
+    pip install requests
+) else (
+    echo requests is already installed.
+)
 echo.
 
 REM Step 1: Run nuitka to build main.exe
