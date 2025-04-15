@@ -33,7 +33,7 @@ echo.
 
 REM Step 1: Run nuitka to build main.exe
 echo 1. Running nuitka to build main.exe...
-python -m nuitka --standalone ..\..\main.py --onefile --enable-plugin=pyqt6 --windows-icon-from-ico="..\asset\windows-logo.ico" --windows-console-mode=disable --company-name="ATOMIC09" --product-name="ChunkerBatchConverter" --file-version=1.0 --product-version=1.0 --file-description="Chunker Batch Converter for Minecraft Worlds" --copyright="Licensed under the GPLv3 License"
+python -m nuitka --standalone ..\..\main.py --onefile --enable-plugin=pyqt6 --include-package=requests --windows-icon-from-ico="..\asset\windows-logo.ico" --windows-console-mode=disable --company-name="ATOMIC09" --product-name="ChunkerBatchConverter" --file-version=1.0 --product-version=1.0 --file-description="Chunker Batch Converter for Minecraft Worlds" --copyright="Licensed under the GPLv3 License"
 if %errorlevel% neq 0 (
     echo ! Nuitka failed to build the application.
     exit /b 1
