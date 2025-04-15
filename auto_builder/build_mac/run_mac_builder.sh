@@ -120,11 +120,11 @@ fi
 echo "✅ PyInstaller build complete."
 echo
 
-# Step 2: Copy "dist/main.app" to "ChunkerBatchConverter.app"
+# Step 2: Copy "dist/main.app" to "Chunker Batch Converter.app"
 if [ -d "dist/main.app" ]; then
-  echo "2️⃣  Copying dist/main.app to ChunkerBatchConverter.app..."
-  cp -r "dist/main.app" "ChunkerBatchConverter.app"
-  echo "✅ Copy complete: dist/main.app to ChunkerBatchConverter.app"
+  echo "2️⃣  Copying dist/main.app to Chunker Batch Converter.app..."
+  cp -r "dist/main.app" "Chunker Batch Converter.app"
+  echo "✅ Copy complete: dist/main.app to Chunker Batch Converter.app"
 else
   echo "⚠️  dist/main.app not found! The build may have failed."
   exit 1
@@ -154,7 +154,7 @@ echo
 
 read -p "5️⃣  Do you want to remove the application files? (y/n): " cleanup
 if [ "$cleanup" == "y" ] || [ "$cleanup" == "Y" ]; then
-  rm -rf ChunkerBatchConverter.app
+  rm -rf "Chunker Batch Converter.app"
   rm main.spec
   echo "✅ Cleanup complete."
 else

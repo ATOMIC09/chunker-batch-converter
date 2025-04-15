@@ -1,8 +1,8 @@
 {
-  "title": "ChunkerBatchConverter Installer",
+  "title": "Chunker Batch Converter Installer",
   "icon": "../asset/mac-logo.icns",
   "contents": [
-    { "x": 192, "y": 150, "type": "file", "path": "ChunkerBatchConverter.app" },
+    { "x": 192, "y": 150, "type": "file", "path": "Chunker Batch Converter.app" },
     { "x": 448, "y": 150, "type": "link", "path": "/Applications" }
   ],
   "window": {
