@@ -17,6 +17,7 @@ A GUI application for batch converting Minecraft worlds between Java and Bedrock
 ## Download
 You can see all versions from `Releases` tab
 - [`Download for Windows (v1.0)`](https://github.com/ATOMIC09/chunker-batch-converter/releases/download/v1.0/ChunkerBatchConverter-1.0-windows-x86_64.exe)
+- [`Download for macOS (Intel) (v1.0)`](https://github.com/ATOMIC09/chunker-batch-converter/releases/download/v1.0/ChunkerBatchConverter-1.0-macintel-x86_64.dmg)
 
 ## Features
 
