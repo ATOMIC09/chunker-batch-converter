@@ -517,7 +517,10 @@ class ChunkerBatchConverter(QMainWindow):
         self.download_progress.setVisible(False)
         self.jar_status_label.setText(f"Status: Downloaded {os.path.basename(jar_path)}")
         self.download_button.setEnabled(True)
-        self.convert_button.setEnabled(self.selected_input_dir and self.selected_output_dir)
+        if self.selected_input_dir and self.selected_output_dir:
+            self.convert_button.setEnabled(True)
+        else:
+            self.convert_button.setEnabled(False)
         self.update_status_list(f"Successfully downloaded {os.path.basename(jar_path)}")
     
     def download_error(self, error_msg):
