@@ -432,6 +432,7 @@ class ChunkerBatchConverter(QMainWindow):
         # Check all locations for jar files
         jar_files = []
         for location in jar_locations:
+            print(f"Checking for chunker-cli.jar in {location}")
             if os.path.exists(location) and os.path.isdir(location):
                 for f in os.listdir(location):
                     if f.startswith('chunker-cli-') and f.endswith('.jar'):
@@ -495,42 +496,6 @@ class ChunkerBatchConverter(QMainWindow):
         if index >= 0 and index < len(self.releases):
             self.selected_version = self.releases[index]
     
-    def get_writable_download_dir(self):
-        """Get a writable directory for downloading the JAR file
-        This handles the case where the app is running from a read-only location (like a Mac .app bundle)
-        """
-        # First try the user's Documents directory
-        try:
-            if sys.platform == 'darwin':  # macOS
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                app_data_dir = os.path.join(documents_dir, "ChunkerBatchConverter")
-            elif sys.platform == 'win32':  # Windows
-                app_data_dir = os.path.join(os.environ["APPDATA"], "ChunkerBatchConverter")
-            else:  # Linux and others
-                app_data_dir = os.path.join(os.path.expanduser("~"), ".chunker-batch-converter")
-            
-            # Create the directory if it doesn't exist
-            if not os.path.exists(app_data_dir):
-                os.makedirs(app_data_dir)
-                self.update_status_list(f"Created application data directory at {app_data_dir}")
-            
-            # Test if the directory is writable
-            test_file = os.path.join(app_data_dir, "write_test")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.remove(test_file)
-            
-            return app_data_dir
-        
-        except Exception as e:
-            self.update_status_list(f"Warning: Could not use application data directory: {str(e)}")
-            
-            # Fallback to a temporary directory
-            import tempfile
-            temp_dir = tempfile.gettempdir()
-            self.update_status_list(f"Using temporary directory for downloads: {temp_dir}")
-            return temp_dir
-    
     def download_selected_version(self):
         """Download the selected chunker-cli.jar version"""
         if not self.selected_version:
@@ -552,9 +517,9 @@ class ChunkerBatchConverter(QMainWindow):
             # Choose download directory based on platform
             if sys.platform == 'darwin':  # macOS
                 # Use Documents folder on macOS to avoid read-only app bundle issues
-                download_dir = self.get_writable_download_dir()
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                download_dir = os.path.join(documents_dir, "ChunkerBatchConverter")
             else:  # Windows and others
-                # Use current directory (same as executable) for Windows
                 download_dir = '.'
                 
             save_path = os.path.join(download_dir, self.selected_version['jar_name'])
